@@ -62,7 +62,7 @@ pub fn vertex_states(module: &naga::Module) -> TokenStream {
         .map(|input| {
             let name = Ident::new(&input.name, Span::call_site());
             let step_mode = Ident::new(&input.name.to_snake(), Span::call_site());
-            step_mode_params.push(quote!(#step_mode: wgpu::VertexStepMode));
+            step_mode_params.push(quote!(#step_mode: VertexStepMode));
             quote!(#name::vertex_buffer_layout(#step_mode))
         })
         .collect();
@@ -124,19 +124,19 @@ pub fn vertex_states(module: &naga::Module) -> TokenStream {
             #[derive(Debug)]
             pub struct VertexEntry<const N: usize> {
                 pub entry_point: &'static str,
-                pub buffers: [wgpu::VertexBufferLayout<'static>; N],
+                pub buffers: [VertexBufferLayout<'static>; N],
                 pub constants: std::collections::HashMap<String, f64>,
             }
 
             pub fn vertex_state<'a, const N: usize>(
-                module: &'a wgpu::ShaderModule,
+                module: &'a ShaderModule,
                 entry: &'a VertexEntry<N>,
-            ) -> wgpu::VertexState<'a> {
-                wgpu::VertexState {
+            ) -> VertexState<'a> {
+                VertexState {
                     module,
                     entry_point: entry.entry_point,
                     buffers: &entry.buffers,
-                    compilation_options: wgpu::PipelineCompilationOptions {
+                    compilation_options: PipelineCompilationOptions {
                         constants: &entry.constants,
                         ..Default::default()
                     },
@@ -171,8 +171,8 @@ fn vertex_input_structs(module: &naga::Module) -> Vec<TokenStream> {
                 let format = Ident::new(&format!("{format:?}"), Span::call_site());
 
                 quote! {
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::#format,
+                    VertexAttribute {
+                        format: VertexFormat::#format,
                         offset: std::mem::offset_of!(#name, #field_name) as u64,
                         shader_location: #location,
                     }
@@ -192,10 +192,10 @@ fn vertex_input_structs(module: &naga::Module) -> Vec<TokenStream> {
         // TODO: Support vertex inputs that aren't in a struct.
         quote! {
             impl #name {
-                pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; #count] = [#(#attributes),*];
+                pub const VERTEX_ATTRIBUTES: [VertexAttribute; #count] = [#(#attributes),*];
 
-                pub const fn vertex_buffer_layout(step_mode: wgpu::VertexStepMode) -> wgpu::VertexBufferLayout<'static> {
-                    wgpu::VertexBufferLayout {
+                pub const fn vertex_buffer_layout(step_mode: VertexStepMode) -> VertexBufferLayout<'static> {
+                    VertexBufferLayout {
                         array_stride: std::mem::size_of::<#name>() as u64,
                         step_mode,
                         attributes: &#name::VERTEX_ATTRIBUTES
@@ -238,7 +238,7 @@ pub fn fragment_states(module: &naga::Module) -> TokenStream {
 
                 Some(quote! {
                     pub fn #fn_name(
-                        targets: [Option<wgpu::ColorTargetState>; #target_count],
+                        targets: [Option<ColorTargetState>; #target_count],
                         #overrides
                     ) -> FragmentEntry<#target_count> {
                         FragmentEntry {
@@ -261,19 +261,19 @@ pub fn fragment_states(module: &naga::Module) -> TokenStream {
             #[derive(Debug)]
             pub struct FragmentEntry<const N: usize> {
                 pub entry_point: &'static str,
-                pub targets: [Option<wgpu::ColorTargetState>; N],
+                pub targets: [Option<ColorTargetState>; N],
                 pub constants: std::collections::HashMap<String, f64>,
             }
 
             pub fn fragment_state<'a, const N: usize>(
-                module: &'a wgpu::ShaderModule,
+                module: &'a ShaderModule,
                 entry: &'a FragmentEntry<N>,
-            ) -> wgpu::FragmentState<'a> {
-                wgpu::FragmentState {
+            ) -> FragmentState<'a> {
+                FragmentState {
                     module,
                     entry_point: entry.entry_point,
                     targets: &entry.targets,
-                    compilation_options: wgpu::PipelineCompilationOptions {
+                    compilation_options: PipelineCompilationOptions {
                         constants: &entry.constants,
                         ..Default::default()
                     },

@@ -215,11 +215,11 @@ fn create_shader_module_inner(
         .unwrap_or_else(|| quote!(#wgsl_source));
 
     let create_shader_module = quote! {
-        pub fn create_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
+        pub fn create_shader_module(device: &RenderDevice) -> ShaderModule {
             let source = std::borrow::Cow::Borrowed(#included_source);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            device.create_shader_module(ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(source)
+                source: ShaderSource::Wgsl(source)
             })
         }
     };
@@ -233,8 +233,8 @@ fn create_shader_module_inner(
         .collect();
 
     let create_pipeline_layout = quote! {
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        pub fn create_pipeline_layout(device: &RenderDevice) -> PipelineLayout {
+            device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: None,
                 bind_group_layouts: &[
                     #(&#bind_group_layouts),*
@@ -296,6 +296,8 @@ fn compute_module(module: &naga::Module) -> TokenStream {
     } else {
         quote! {
             pub mod compute {
+                use bevy::render::{render_resource::*, renderer::RenderDevice};
+                
                 #(#entry_points)*
             }
         }
@@ -304,20 +306,19 @@ fn compute_module(module: &naga::Module) -> TokenStream {
 
 fn create_compute_pipeline(e: &naga::EntryPoint) -> TokenStream {
     // Compute pipeline creation has few parameters and can be generated.
-    let pipeline_name = Ident::new(&format!("create_{}_pipeline", e.name), Span::call_site());
+    let pipeline_name = Ident::new(&format!("create_{}_pipeline", e.name.to_lowercase()), Span::call_site());
     let entry_point = &e.name;
     // TODO: Include a user supplied module name in the label?
     let label = format!("Compute Pipeline {}", e.name);
     quote! {
-        pub fn #pipeline_name(device: &wgpu::Device) -> wgpu::ComputePipeline {
+        pub fn #pipeline_name(device: &RenderDevice) -> ComputePipeline {
             let module = super::create_shader_module(device);
             let layout = super::create_pipeline_layout(device);
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(#label),
                 layout: Some(&layout),
                 module: &module,
-                entry_point: #entry_point,
-                compilation_options: Default::default(),
+                entry_point: #entry_point
             })
         }
     }

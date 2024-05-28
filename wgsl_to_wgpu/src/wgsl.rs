@@ -35,16 +35,16 @@ pub fn rust_scalar_type(scalar: &naga::Scalar) -> TokenStream {
 
 pub fn buffer_binding_type(storage: naga::AddressSpace) -> TokenStream {
     match storage {
-        naga::AddressSpace::Uniform => quote!(wgpu::BufferBindingType::Uniform),
+        naga::AddressSpace::Uniform => quote!(BufferBindingType::Uniform),
         naga::AddressSpace::Storage { access } => {
             let _is_read = access.contains(naga::StorageAccess::LOAD);
             let is_write = access.contains(naga::StorageAccess::STORE);
 
             // TODO: Is this correct?
             if is_write {
-                quote!(wgpu::BufferBindingType::Storage { read_only: false })
+                quote!(BufferBindingType::Storage { read_only: false })
             } else {
-                quote!(wgpu::BufferBindingType::Storage { read_only: true })
+                quote!(BufferBindingType::Storage { read_only: true })
             }
         }
         _ => todo!(),
@@ -116,12 +116,12 @@ fn glam_matrix_type(rows: naga::VectorSize, columns: naga::VectorSize, width: u8
     // glam only supports square matrices for some types.
     // Use Rust types for unsupported matrices.
     match (rows, columns, width) {
-        (naga::VectorSize::Bi, naga::VectorSize::Bi, 4) => quote!(glam::Mat2),
-        (naga::VectorSize::Tri, naga::VectorSize::Tri, 4) => quote!(glam::Mat3),
-        (naga::VectorSize::Quad, naga::VectorSize::Quad, 4) => quote!(glam::Mat4),
-        (naga::VectorSize::Bi, naga::VectorSize::Bi, 8) => quote!(glam::DMat2),
-        (naga::VectorSize::Tri, naga::VectorSize::Tri, 8) => quote!(glam::DMat3),
-        (naga::VectorSize::Quad, naga::VectorSize::Quad, 8) => quote!(glam::DMat4),
+        (naga::VectorSize::Bi, naga::VectorSize::Bi, 4) => quote!(bevy::math::Mat2),
+        (naga::VectorSize::Tri, naga::VectorSize::Tri, 4) => quote!(bevy::math::Mat3),
+        (naga::VectorSize::Quad, naga::VectorSize::Quad, 4) => quote!(bevy::math::Mat4),
+        (naga::VectorSize::Bi, naga::VectorSize::Bi, 8) => quote!(bevy::math::DMat2),
+        (naga::VectorSize::Tri, naga::VectorSize::Tri, 8) => quote!(bevy::math::DMat3),
+        (naga::VectorSize::Quad, naga::VectorSize::Quad, 8) => quote!(bevy::math::DMat4),
         _ => rust_matrix_type(rows, columns, width),
     }
 }
@@ -148,18 +148,18 @@ fn rust_vector_type(size: naga::VectorSize, kind: naga::ScalarKind, width: u8) -
 
 fn glam_vector_type(size: naga::VectorSize, kind: naga::ScalarKind, width: u8) -> TokenStream {
     match (size, kind, width) {
-        (naga::VectorSize::Bi, naga::ScalarKind::Float, 4) => quote!(glam::Vec2),
-        (naga::VectorSize::Tri, naga::ScalarKind::Float, 4) => quote!(glam::Vec3),
-        (naga::VectorSize::Quad, naga::ScalarKind::Float, 4) => quote!(glam::Vec4),
-        (naga::VectorSize::Bi, naga::ScalarKind::Float, 8) => quote!(glam::DVec2),
-        (naga::VectorSize::Tri, naga::ScalarKind::Float, 8) => quote!(glam::DVec3),
-        (naga::VectorSize::Quad, naga::ScalarKind::Float, 8) => quote!(glam::DVec4),
-        (naga::VectorSize::Bi, naga::ScalarKind::Uint, 4) => quote!(glam::UVec2),
-        (naga::VectorSize::Tri, naga::ScalarKind::Uint, 4) => quote!(glam::UVec3),
-        (naga::VectorSize::Quad, naga::ScalarKind::Uint, 4) => quote!(glam::UVec4),
-        (naga::VectorSize::Bi, naga::ScalarKind::Sint, 4) => quote!(glam::IVec2),
-        (naga::VectorSize::Tri, naga::ScalarKind::Sint, 4) => quote!(glam::IVec3),
-        (naga::VectorSize::Quad, naga::ScalarKind::Sint, 4) => quote!(glam::IVec4),
+        (naga::VectorSize::Bi, naga::ScalarKind::Float, 4) => quote!(bevy::math::Vec2),
+        (naga::VectorSize::Tri, naga::ScalarKind::Float, 4) => quote!(bevy::math::Vec3),
+        (naga::VectorSize::Quad, naga::ScalarKind::Float, 4) => quote!(bevy::math::Vec4),
+        (naga::VectorSize::Bi, naga::ScalarKind::Float, 8) => quote!(bevy::math::DVec2),
+        (naga::VectorSize::Tri, naga::ScalarKind::Float, 8) => quote!(bevy::math::DVec3),
+        (naga::VectorSize::Quad, naga::ScalarKind::Float, 8) => quote!(bevy::math::DVec4),
+        (naga::VectorSize::Bi, naga::ScalarKind::Uint, 4) => quote!(bevy::math::UVec2),
+        (naga::VectorSize::Tri, naga::ScalarKind::Uint, 4) => quote!(bevy::math::UVec3),
+        (naga::VectorSize::Quad, naga::ScalarKind::Uint, 4) => quote!(bevy::math::UVec4),
+        (naga::VectorSize::Bi, naga::ScalarKind::Sint, 4) => quote!(bevy::math::IVec2),
+        (naga::VectorSize::Tri, naga::ScalarKind::Sint, 4) => quote!(bevy::math::IVec3),
+        (naga::VectorSize::Quad, naga::ScalarKind::Sint, 4) => quote!(bevy::math::IVec4),
         // Use Rust types for unsupported types.
         _ => rust_vector_type(size, kind, width),
     }
