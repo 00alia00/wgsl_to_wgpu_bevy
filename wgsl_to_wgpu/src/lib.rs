@@ -304,7 +304,7 @@ fn compute_module(module: &naga::Module) -> TokenStream {
 
 fn create_compute_pipeline(e: &naga::EntryPoint) -> TokenStream {
     // Compute pipeline creation has few parameters and can be generated.
-    let pipeline_name = Ident::new(&format!("create_{}_pipeline", e.name), Span::call_site());
+    let pipeline_name = Ident::new(&format!("create_{}_pipeline", e.name.to_lowercase()), Span::call_site());
     let entry_point = &e.name;
     // TODO: Include a user supplied module name in the label?
     let label = format!("Compute Pipeline {}", e.name);
@@ -316,8 +316,7 @@ fn create_compute_pipeline(e: &naga::EntryPoint) -> TokenStream {
                 label: Some(#label),
                 layout: Some(&layout),
                 module: &module,
-                entry_point: #entry_point,
-                compilation_options: Default::default(),
+                entry_point: #entry_point
             })
         }
     }
