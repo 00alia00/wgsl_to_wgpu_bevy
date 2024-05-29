@@ -343,8 +343,10 @@ fn bind_group(group_no: u32, group: &GroupData, shader_stages: wgpu::ShaderStage
 
     let bind_group_name = indexed_name_to_ident("BindGroup", group_no);
     let bind_group_layout_name = indexed_name_to_ident("BindGroupLayout", group_no);
-
     let layout_descriptor_name = indexed_name_to_ident("LAYOUT_DESCRIPTOR", group_no);
+
+    let bind_group_name_str = format!("BindGroup{group_no}");
+    let bind_group_layout_name_str = format!("BindGroupLayout{group_no}");
 
     let group_no = Index::from(group_no as usize);
     // let entries: Vec<_> = group
@@ -358,13 +360,13 @@ fn bind_group(group_no: u32, group: &GroupData, shader_stages: wgpu::ShaderStage
                 #layout_descriptor_name.to_vec()
             }
             pub fn get_bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
-                render_device.create_bind_group_layout("layout", &#layout_descriptor_name)
+                render_device.create_bind_group_layout(#bind_group_layout_name_str, &#layout_descriptor_name)
             }
 
             pub fn from_bindings(render_device: &RenderDevice, bindings: #bind_group_layout_name) -> Self {
-                let bind_group_layout = render_device.create_bind_group_layout("layout", &#layout_descriptor_name);
+                let bind_group_layout = render_device.create_bind_group_layout(#bind_group_layout_name_str, &#layout_descriptor_name);
                 let bind_group = render_device.create_bind_group(
-                    "layout",
+                    #bind_group_name_str,
                     &bind_group_layout,
                     &[
                         #(#entries),*
