@@ -3,12 +3,12 @@
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VertexInput {
-    pub position: glam::Vec3,
+    pub position: bevy::math::Vec3,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, encase::ShaderType)]
 pub struct Uniforms {
-    pub color_rgb: glam::Vec3,
+    pub color_rgb: bevy::math::Vec3,
 }
 pub struct OverrideConstants {
     pub force_black: bool,
