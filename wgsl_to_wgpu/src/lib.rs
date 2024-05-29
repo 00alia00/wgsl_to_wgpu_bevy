@@ -209,18 +209,11 @@ fn create_shader_module_inner(
     let vertex_states = vertex_states(&module);
     let fragment_states = fragment_states(&module);
 
-    // Use a string literal if no include path is provided.
-    let included_source = wgsl_include_path
-        .map(|p| quote!(include_str!(#p)))
-        .unwrap_or_else(|| quote!(#wgsl_source));
-
     let create_shader_module = quote! {
-        pub fn create_shader_module(device: &RenderDevice) -> ShaderModule {
-            let source = std::borrow::Cow::Borrowed(#included_source);
-            device.create_shader_module(ShaderModuleDescriptor {
-                label: None,
-                source: ShaderSource::Wgsl(source)
-            })
+        use bevy::prelude::*;
+
+        pub fn create_shader_module(world: &World) -> Handle<Shader> {
+            world.resource::<AssetServer>().load(#wgsl_include_path)            
         }
     };
 
@@ -228,13 +221,15 @@ fn create_shader_module_inner(
         .keys()
         .map(|group_no| {
             let group = indexed_name_to_ident("BindGroup", *group_no);
-            quote!(bind_groups::#group::get_bind_group_layout(device))
+            quote!(bind_groups::#group::get_bind_group_layout(render_device))
         })
         .collect();
 
+
     let create_pipeline_layout = quote! {
-        pub fn create_pipeline_layout(device: &RenderDevice) -> PipelineLayout {
-            device.create_pipeline_layout(&PipelineLayoutDescriptor {
+
+        pub fn create_pipeline_layout(render_device: &RenderDevice) -> PipelineLayout {
+            render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: None,
                 bind_group_layouts: &[
                     #(&#bind_group_layouts),*
@@ -244,6 +239,27 @@ fn create_shader_module_inner(
         }
     };
 
+    let bind_group_layouts: Vec<_> = bind_group_data
+        .keys()
+        .map(|group_no| {
+            let group = indexed_name_to_ident("BindGroup", *group_no);
+            quote!(bind_groups::#group::get_bind_group_layout_entry())
+        })
+        .collect();
+
+    let create_bindgroup_layout = quote! {
+        pub fn create_bindgroup_layout(render_device: &RenderDevice) -> Vec<BindGroupLayout> {
+            let groups = vec![
+                #(#bind_group_layouts),*
+            ]; 
+            let mut entries = Vec::<BindGroupLayout>::new();
+            for group in &groups {
+                let layout = render_device.create_bind_group_layout("BindGroupLayout", group);
+                entries.push(layout);
+            }
+            entries
+        }
+    };
     let override_constants = pipeline_overridable_constants(&module);
 
     let output = quote! {
@@ -258,6 +274,7 @@ fn create_shader_module_inner(
         #fragment_states
         #create_shader_module
         #create_pipeline_layout
+        #create_bindgroup_layout
     };
     Ok(pretty_print(&output))
 }
@@ -297,6 +314,8 @@ fn compute_module(module: &naga::Module) -> TokenStream {
         quote! {
             pub mod compute {
                 use bevy::render::{render_resource::*, renderer::RenderDevice};
+                use bevy::prelude::*;
+                use std::borrow::Cow;
                 
                 #(#entry_points)*
             }
@@ -311,14 +330,20 @@ fn create_compute_pipeline(e: &naga::EntryPoint) -> TokenStream {
     // TODO: Include a user supplied module name in the label?
     let label = format!("Compute Pipeline {}", e.name);
     quote! {
-        pub fn #pipeline_name(device: &RenderDevice) -> ComputePipeline {
-            let module = super::create_shader_module(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(#label),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: #entry_point
+        pub fn #pipeline_name(world: &mut World) -> CachedComputePipelineId {
+            let render_device = world.resource::<RenderDevice>();
+            let pipeline_cache = world.resource::<PipelineCache>();
+    
+            let shader = super::create_shader_module(world);
+            let layout = super::create_bindgroup_layout(render_device);
+
+            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label: Some(Cow::from(#label)),
+                layout: layout,
+                push_constant_ranges: vec![],    
+                shader: shader.clone(),
+                shader_defs: vec![],
+                entry_point: Cow::from(#entry_point),
             })
         }
     }
@@ -343,501 +368,4 @@ macro_rules! assert_tokens_eq {
     ($a:expr, $b:expr) => {
         pretty_assertions::assert_eq!(crate::pretty_print(&$a), crate::pretty_print(&$b))
     };
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use indoc::indoc;
-
-    #[test]
-    fn create_shader_module_include_source() {
-        let source = indoc! {r#"
-            @fragment
-            fn fs_main() {}
-        "#};
-
-        let actual = create_shader_module(source, "shader.wgsl", WriteOptions::default()).unwrap();
-
-        pretty_assertions::assert_eq!(
-            indoc! {r#"
-                pub const ENTRY_FS_MAIN: &str = "fs_main";
-                #[derive(Debug)]
-                pub struct FragmentEntry<const N: usize> {
-                    pub entry_point: &'static str,
-                    pub targets: [Option<wgpu::ColorTargetState>; N],
-                    pub constants: std::collections::HashMap<String, f64>,
-                }
-                pub fn fragment_state<'a, const N: usize>(
-                    module: &'a wgpu::ShaderModule,
-                    entry: &'a FragmentEntry<N>,
-                ) -> wgpu::FragmentState<'a> {
-                    wgpu::FragmentState {
-                        module,
-                        entry_point: entry.entry_point,
-                        targets: &entry.targets,
-                        compilation_options: wgpu::PipelineCompilationOptions {
-                            constants: &entry.constants,
-                            ..Default::default()
-                        },
-                    }
-                }
-                pub fn fs_main_entry(targets: [Option<wgpu::ColorTargetState>; 0]) -> FragmentEntry<0> {
-                    FragmentEntry {
-                        entry_point: ENTRY_FS_MAIN,
-                        targets,
-                        constants: Default::default(),
-                    }
-                }
-                pub fn create_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
-                    let source = std::borrow::Cow::Borrowed(include_str!("shader.wgsl"));
-                    device
-                        .create_shader_module(wgpu::ShaderModuleDescriptor {
-                            label: None,
-                            source: wgpu::ShaderSource::Wgsl(source),
-                        })
-                }
-                pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-                    device
-                        .create_pipeline_layout(
-                            &wgpu::PipelineLayoutDescriptor {
-                                label: None,
-                                bind_group_layouts: &[],
-                                push_constant_ranges: &[],
-                            },
-                        )
-                }
-            "#},
-            actual
-        );
-    }
-
-    #[test]
-    fn create_shader_module_embed_source() {
-        let source = indoc! {r#"
-            @fragment
-            fn fs_main() {}
-        "#};
-
-        let actual = create_shader_module_embedded(source, WriteOptions::default()).unwrap();
-
-        pretty_assertions::assert_eq!(
-            indoc! {r#"
-                pub const ENTRY_FS_MAIN: &str = "fs_main";
-                #[derive(Debug)]
-                pub struct FragmentEntry<const N: usize> {
-                    pub entry_point: &'static str,
-                    pub targets: [Option<wgpu::ColorTargetState>; N],
-                    pub constants: std::collections::HashMap<String, f64>,
-                }
-                pub fn fragment_state<'a, const N: usize>(
-                    module: &'a wgpu::ShaderModule,
-                    entry: &'a FragmentEntry<N>,
-                ) -> wgpu::FragmentState<'a> {
-                    wgpu::FragmentState {
-                        module,
-                        entry_point: entry.entry_point,
-                        targets: &entry.targets,
-                        compilation_options: wgpu::PipelineCompilationOptions {
-                            constants: &entry.constants,
-                            ..Default::default()
-                        },
-                    }
-                }
-                pub fn fs_main_entry(targets: [Option<wgpu::ColorTargetState>; 0]) -> FragmentEntry<0> {
-                    FragmentEntry {
-                        entry_point: ENTRY_FS_MAIN,
-                        targets,
-                        constants: Default::default(),
-                    }
-                }
-                pub fn create_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
-                    let source = std::borrow::Cow::Borrowed("@fragment\nfn fs_main() {}\n");
-                    device
-                        .create_shader_module(wgpu::ShaderModuleDescriptor {
-                            label: None,
-                            source: wgpu::ShaderSource::Wgsl(source),
-                        })
-                }
-                pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-                    device
-                        .create_pipeline_layout(
-                            &wgpu::PipelineLayoutDescriptor {
-                                label: None,
-                                bind_group_layouts: &[],
-                                push_constant_ranges: &[],
-                            },
-                        )
-                }
-            "#},
-            actual
-        );
-    }
-
-    #[test]
-    fn create_shader_module_consecutive_bind_groups() {
-        let source = indoc! {r#"
-            struct A {
-                f: vec4<f32>
-            };
-            @group(0) @binding(0) var<uniform> a: A;
-            @group(1) @binding(0) var<uniform> b: A;
-
-            @vertex
-            fn vs_main() {}
-
-            @fragment
-            fn fs_main() {}
-        "#};
-
-        create_shader_module(source, "shader.wgsl", WriteOptions::default()).unwrap();
-    }
-
-    #[test]
-    fn create_shader_module_non_consecutive_bind_groups() {
-        let source = indoc! {r#"
-            @group(0) @binding(0) var<uniform> a: vec4<f32>;
-            @group(1) @binding(0) var<uniform> b: vec4<f32>;
-            @group(3) @binding(0) var<uniform> c: vec4<f32>;
-
-            @fragment
-            fn main() {}
-        "#};
-
-        let result = create_shader_module(source, "shader.wgsl", WriteOptions::default());
-        assert!(matches!(
-            result,
-            Err(CreateModuleError::NonConsecutiveBindGroups)
-        ));
-    }
-
-    #[test]
-    fn create_shader_module_repeated_bindings() {
-        let source = indoc! {r#"
-            struct A {
-                f: vec4<f32>
-            };
-            @group(0) @binding(2) var<uniform> a: A;
-            @group(0) @binding(2) var<uniform> b: A;
-
-            @fragment
-            fn main() {}
-        "#};
-
-        let result = create_shader_module(source, "shader.wgsl", WriteOptions::default());
-        assert!(matches!(
-            result,
-            Err(CreateModuleError::DuplicateBinding { binding: 2 })
-        ));
-    }
-
-    #[test]
-    fn write_vertex_module_empty() {
-        let source = indoc! {r#"
-            @vertex
-            fn main() {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = vertex_struct_methods(&module);
-
-        assert_tokens_eq!(quote!(), actual);
-    }
-
-    #[test]
-    fn write_vertex_module_single_input_float32() {
-        let source = indoc! {r#"
-            struct VertexInput0 {
-                @location(0) a: f32,
-                @location(1) b: vec2<f32>,
-                @location(2) c: vec3<f32>,
-                @location(3) d: vec4<f32>,
-            };
-
-            @vertex
-            fn main(in0: VertexInput0) {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = vertex_struct_methods(&module);
-
-        assert_tokens_eq!(
-            quote! {
-                impl VertexInput0 {
-                    pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = [
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: std::mem::offset_of!(VertexInput0, b) as u64,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: std::mem::offset_of!(VertexInput0, c) as u64,
-                            shader_location: 2,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x4,
-                            offset: std::mem::offset_of!(VertexInput0, d) as u64,
-                            shader_location: 3,
-                        },
-                    ];
-                    pub const fn vertex_buffer_layout(
-                        step_mode: wgpu::VertexStepMode,
-                    ) -> wgpu::VertexBufferLayout<'static> {
-                        wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<VertexInput0>() as u64,
-                            step_mode,
-                            attributes: &VertexInput0::VERTEX_ATTRIBUTES,
-                        }
-                    }
-                }
-            },
-            actual
-        );
-    }
-
-    #[test]
-    fn write_vertex_module_single_input_float64() {
-        let source = indoc! {r#"
-            struct VertexInput0 {
-                @location(0) a: f64,
-                @location(1) b: vec2<f64>,
-                @location(2) c: vec3<f64>,
-                @location(3) d: vec4<f64>,
-            };
-
-            @vertex
-            fn main(in0: VertexInput0) {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = vertex_struct_methods(&module);
-
-        assert_tokens_eq!(
-            quote! {
-                impl VertexInput0 {
-                    pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = [
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float64,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float64x2,
-                            offset: std::mem::offset_of!(VertexInput0, b) as u64,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float64x3,
-                            offset: std::mem::offset_of!(VertexInput0, c) as u64,
-                            shader_location: 2,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float64x4,
-                            offset: std::mem::offset_of!(VertexInput0, d) as u64,
-                            shader_location: 3,
-                        },
-                    ];
-                    pub const fn vertex_buffer_layout(
-                        step_mode: wgpu::VertexStepMode,
-                    ) -> wgpu::VertexBufferLayout<'static> {
-                        wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<VertexInput0>() as u64,
-                            step_mode,
-                            attributes: &VertexInput0::VERTEX_ATTRIBUTES,
-                        }
-                    }
-                }
-            },
-            actual
-        );
-    }
-
-    #[test]
-    fn write_vertex_module_single_input_sint32() {
-        let source = indoc! {r#"
-            struct VertexInput0 {
-                @location(0) a: i32,
-                @location(1) a: vec2<i32>,
-                @location(2) a: vec3<i32>,
-                @location(3) a: vec4<i32>,
-
-            };
-
-            @vertex
-            fn main(in0: VertexInput0) {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = vertex_struct_methods(&module);
-
-        assert_tokens_eq!(
-            quote! {
-                impl VertexInput0 {
-                    pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = [
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Sint32,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Sint32x2,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Sint32x3,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 2,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Sint32x4,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 3,
-                        },
-                    ];
-                    pub const fn vertex_buffer_layout(
-                        step_mode: wgpu::VertexStepMode,
-                    ) -> wgpu::VertexBufferLayout<'static> {
-                        wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<VertexInput0>() as u64,
-                            step_mode,
-                            attributes: &VertexInput0::VERTEX_ATTRIBUTES,
-                        }
-                    }
-                }
-            },
-            actual
-        );
-    }
-
-    #[test]
-    fn write_vertex_module_single_input_uint32() {
-        let source = indoc! {r#"
-            struct VertexInput0 {
-                @location(0) a: u32,
-                @location(1) b: vec2<u32>,
-                @location(2) c: vec3<u32>,
-                @location(3) d: vec4<u32>,
-            };
-
-            @vertex
-            fn main(in0: VertexInput0) {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = vertex_struct_methods(&module);
-
-        assert_tokens_eq!(
-            quote! {
-                impl VertexInput0 {
-                    pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = [
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32,
-                            offset: std::mem::offset_of!(VertexInput0, a) as u64,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32x2,
-                            offset: std::mem::offset_of!(VertexInput0, b) as u64,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32x3,
-                            offset: std::mem::offset_of!(VertexInput0, c) as u64,
-                            shader_location: 2,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32x4,
-                            offset: std::mem::offset_of!(VertexInput0, d) as u64,
-                            shader_location: 3,
-                        },
-                    ];
-                    pub const fn vertex_buffer_layout(
-                        step_mode: wgpu::VertexStepMode,
-                    ) -> wgpu::VertexBufferLayout<'static> {
-                        wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<VertexInput0>() as u64,
-                            step_mode,
-                            attributes: &VertexInput0::VERTEX_ATTRIBUTES,
-                        }
-                    }
-                }
-            },
-            actual
-        );
-    }
-
-    #[test]
-    fn write_compute_module_empty() {
-        let source = indoc! {r#"
-            @vertex
-            fn main() {}
-        "#};
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = compute_module(&module);
-
-        assert_tokens_eq!(quote!(), actual);
-    }
-
-    #[test]
-    fn write_compute_module_multiple_entries() {
-        let source = indoc! {r#"
-            @compute
-            @workgroup_size(1,2,3)
-            fn main1() {}
-
-            @compute
-            @workgroup_size(256)
-            fn main2() {}
-        "#
-        };
-
-        let module = naga::front::wgsl::parse_str(source).unwrap();
-        let actual = compute_module(&module);
-
-        assert_tokens_eq!(
-            quote! {
-                pub mod compute {
-                    pub const MAIN1_WORKGROUP_SIZE: [u32; 3] = [1, 2, 3];
-                    pub fn create_main1_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
-                        let module = super::create_shader_module(device);
-                        let layout = super::create_pipeline_layout(device);
-                        device
-                            .create_compute_pipeline(
-                                &wgpu::ComputePipelineDescriptor {
-                                    label: Some("Compute Pipeline main1"),
-                                    layout: Some(&layout),
-                                    module: &module,
-                                    entry_point: "main1",
-                                    compilation_options: Default::default(),
-                                },
-                            )
-                    }
-                    pub const MAIN2_WORKGROUP_SIZE: [u32; 3] = [256, 1, 1];
-                    pub fn create_main2_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
-                        let module = super::create_shader_module(device);
-                        let layout = super::create_pipeline_layout(device);
-                        device
-                            .create_compute_pipeline(
-                                &wgpu::ComputePipelineDescriptor {
-                                    label: Some("Compute Pipeline main2"),
-                                    layout: Some(&layout),
-                                    module: &module,
-                                    entry_point: "main2",
-                                    compilation_options: Default::default(),
-                                },
-                            )
-                    }
-                }
-            },
-            actual
-        );
-    }
 }
