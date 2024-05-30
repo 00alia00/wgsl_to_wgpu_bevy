@@ -150,6 +150,9 @@ fn rust_struct(
         derives.push(quote!(serde::Deserialize));
     }
 
+    derives.push(quote!(Reflect));
+    derives.push(quote!(bevy_inspector_egui::InspectorOptions));
+
     let assert_layout = if options.derive_bytemuck_host_shareable && is_host_shareable {
         // Assert that the Rust layout matches the WGSL layout.
         // Enable for bytemuck since it uses the Rust struct's memory layout.

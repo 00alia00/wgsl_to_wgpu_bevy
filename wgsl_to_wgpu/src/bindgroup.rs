@@ -89,13 +89,13 @@ pub fn bind_groups_module(
     } else {
         // Create a module to avoid name conflicts with user structs.
         quote! {
-            pub mod bind_groups {
-                use bevy::render::{render_resource::*, renderer::RenderDevice};
+            pub mod bind_groups { 
+                use bevy::{ecs::system::Resource, render::{render_resource::*, renderer::RenderDevice}};
 
                 #(#bind_groups)*
 
-                #[derive(Debug, Copy, Clone)]
                 pub struct BindGroups<'a> {
+                #[derive(Debug, Copy, Clone, Resource)]
                     #(#bind_group_fields),*
                 }
 
