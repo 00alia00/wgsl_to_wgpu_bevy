@@ -94,8 +94,8 @@ pub fn bind_groups_module(
 
                 #(#bind_groups)*
 
-                pub struct BindGroups<'a> {
                 #[derive(Debug, Copy, Clone, Resource)]
+                pub struct BindGroups<'a> {
                     #(#bind_group_fields),*
                 }
 
